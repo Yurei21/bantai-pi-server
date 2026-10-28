@@ -124,7 +124,7 @@ class CloudflareSFUPublisher:
                 self._log_sdp_candidate_summary(answer_sdp, "publisher Cloudflare answer")
                 normalized_sdp = self._normalize_bundled_answer_candidates(answer_sdp)
                 if normalized_sdp != answer_sdp:
-                    logger.info("SFU publisher copied bundled ICE candidates across BUNDLE media sections for aiortc")
+                    logger.info("SFU publisher normalized bundled ICE candidates and DTLS attributes for aiortc")
                 await pc.setRemoteDescription(RTCSessionDescription(sdp=normalized_sdp, type=description["type"]))
                 if self.ice_debug:
                     self._log_parsed_remote_ice(normalized_sdp, pc)
