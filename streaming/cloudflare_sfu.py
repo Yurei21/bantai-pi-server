@@ -10,9 +10,6 @@ from aiortc.rtcicetransport import connection_kwargs
 from streaming.webrtc import CameraVideoTrack
 
 logger = logging.getLogger("bantai-server")
-logging.getLogger("aiortc").setLevel(logging.DEBUG)
-logging.getLogger("aiortc.rtcicetransport").setLevel(logging.DEBUG)
-
 
 class CloudflareSFUPublisher:
     """Publish the Pi's shared camera pipelines as named SFU tracks."""
@@ -28,6 +25,8 @@ class CloudflareSFUPublisher:
             logging.getLogger("aioice").setLevel(logging.DEBUG)
             logging.getLogger("aioice.ice").setLevel(logging.DEBUG)
             logging.getLogger("aioice.turn").setLevel(logging.DEBUG)
+            logging.getLogger("aiortc").setLevel(logging.DEBUG)
+            logging.getLogger("aiortc.rtcicetransport").setLevel(logging.DEBUG)
             logger.info("SFU publisher detailed ICE diagnostics enabled")
         logger.info(
             "SFU environment check: turn_urls=%d username_set=%s credential_set=%s",
