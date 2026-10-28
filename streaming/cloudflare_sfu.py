@@ -21,6 +21,12 @@ class CloudflareSFUPublisher:
         self.turn_urls = [url.strip() for url in os.getenv("CF_SFU_TURN_URLS", "").split(",") if url.strip()]
         self.turn_username = os.getenv("CF_SFU_TURN_USERNAME", "").strip()
         self.turn_credential = os.getenv("CF_SFU_TURN_CREDENTIAL", "").strip()
+        self.ice_debug = os.getenv("CF_SFU_ICE_DEBUG", "").strip().lower() in {"1", "true", "yes"}
+        if self.ice_debug:
+            logging.getLogger("aioice").setLevel(logging.DEBUG)
+            logging.getLogger("aioice.ice").setLevel(logging.DEBUG)
+            logging.getLogger("aioice.turn").setLevel(logging.DEBUG)
+            logger.info("SFU publisher detailed ICE diagnostics enabled")
         logger.info(
             "SFU environment check: turn_urls=%d username_set=%s credential_set=%s",
             len(self.turn_urls), bool(self.turn_username), bool(self.turn_credential),
