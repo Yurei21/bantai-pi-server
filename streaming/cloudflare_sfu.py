@@ -296,7 +296,7 @@ class CloudflareSFUPublisher:
         normalized = []
         for section in sections:
             mid = next((item[6:] for item in section if item.startswith("a=mid:")), None)
-            if mid not in bundle_mids or mid == primary_mid:
+            if mid not in bundle_mids:
                 normalized.extend(section)
                 continue
             section_ufrag = next((line for line in section
