@@ -210,7 +210,22 @@ class CloudflareSFUPublisher:
 
     @staticmethod
     def _log_remote_ice_configuration(pc: RTCPeerConnection) -> None:
-        for index, transport in enumerate(pc._RTCPeerConnection__iceTransports):
+        transports = list(pc._RTCPeerConnection__iceTransports)
+        transport_indexes = {id(transport): index for index, transport in enumerate(transports)}
+        for transceiver in pc.getTransceivers():
+            dtls_transport = transceiver.receiver.transport
+            ice_transport = dtls_transport.transport
+            transport_index = transport_indexes.get(id(ice_transport))
+            connection = ice_transport._connection
+            logger.info(
+                "SFU ICE MID mapping mid=%s kind=%s direction=%s transport=%s remote_candidates=%d",
+                transceiver.mid,
+                transceiver.kind,
+                transceiver.direction,
+                transport_index if transport_index is not None else "unmapped",
+                len(connection.remote_candidates),
+            )
+        for index, transport in enumerate(transports):
             connection = transport._connection
             remote_candidates = list(connection.remote_candidates)
             logger.info(
