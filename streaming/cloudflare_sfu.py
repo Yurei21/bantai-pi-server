@@ -17,6 +17,13 @@ class CloudflareSFUPublisher:
     def __init__(self):
         self.app_id = os.getenv("CF_SFU_APP_ID", "").strip()
         self.app_secret = os.getenv("CF_SFU_APP_SECRET", "").strip()
+        self.turn_urls = [url.strip() for url in os.getenv("CF_SFU_TURN_URLS", "").split(",") if url.strip()]
+        self.turn_username = os.getenv("CF_SFU_TURN_USERNAME", "").strip()
+        self.turn_credential = os.getenv("CF_SFU_TURN_CREDENTIAL", "").strip()
+        logger.info(
+            "SFU environment check: turn_urls=%d username_set=%s credential_set=%s",
+            len(self.turn_urls), bool(self.turn_username), bool(self.turn_credential),
+        )
         self.pc: RTCPeerConnection | None = None
         self.session_id: str | None = None
         self._lock = asyncio.Lock()
@@ -51,7 +58,19 @@ class CloudflareSFUPublisher:
             if not all(name in pipelines for name in ("cam0", "cam1")):
                 raise RuntimeError("Both camera pipelines must be running")
 
-            pc = RTCPeerConnection(RTCConfiguration(iceServers=[RTCIceServer(urls=["stun:stun.cloudflare.com:3478"])]))
+            ice_servers = [RTCIceServer(urls=["stun:stun.cloudflare.com:3478"])]
+            if self.turn_urls:
+                if not self.turn_username or not self.turn_credential:
+                    raise RuntimeError("CF_SFU_TURN_USERNAME and CF_SFU_TURN_CREDENTIAL are required when CF_SFU_TURN_URLS is set")
+                ice_servers.append(RTCIceServer(
+                    urls=self.turn_urls,
+                    username=self.turn_username,
+                    credential=self.turn_credential,
+                ))
+                logger.info("SFU publisher configured with TURN relay (%d URL(s))", len(self.turn_urls))
+            else:
+                logger.warning("SFU publisher has no TURN server configured; using STUN only")
+            pc = RTCPeerConnection(RTCConfiguration(iceServers=ice_servers))
             self._log_peer_connection(pc, "publisher")
             session_id = None
             try:
