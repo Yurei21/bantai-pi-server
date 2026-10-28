@@ -125,6 +125,7 @@ class CloudflareSFUPublisher:
                 normalized_sdp = self._normalize_bundled_answer_candidates(answer_sdp)
                 if normalized_sdp != answer_sdp:
                     logger.info("SFU publisher normalized bundled ICE candidates and DTLS attributes for aiortc")
+                self._validate_remote_dtls_fingerprints(normalized_sdp)
                 await pc.setRemoteDescription(RTCSessionDescription(sdp=normalized_sdp, type=description["type"]))
                 if self.ice_debug:
                     self._log_parsed_remote_ice(normalized_sdp, pc)
@@ -257,8 +258,13 @@ class CloudflareSFUPublisher:
                       if line.startswith("a=candidate:")]
         transport_attributes = [line for line in primary_candidates[0]
                                 if line.startswith(("a=fingerprint:", "a=setup:"))]
-        if not transport_attributes:
-            transport_attributes = session_transport_attributes
+        present_attribute_types = {
+            line.split(":", 1)[0] for line in transport_attributes
+        }
+        transport_attributes.extend(
+            line for line in session_transport_attributes
+            if line.split(":", 1)[0] not in present_attribute_types
+        )
         if not candidates:
             return sdp_text
         primary_ufrag = next((line for line in primary_candidates[0]
@@ -300,6 +306,32 @@ class CloudflareSFUPublisher:
                 changed = True
             normalized.extend(section)
         return "\r\n".join(normalized) + "\r\n" if changed else sdp_text
+
+    @staticmethod
+    def _validate_remote_dtls_fingerprints(sdp_text: str) -> None:
+        sections = []
+        session_lines = []
+        current = session_lines
+        for line in sdp_text.splitlines():
+            if line.startswith("m="):
+                current = [line]
+                sections.append(current)
+            else:
+                current.append(line)
+        session_fingerprints = [line for line in session_lines
+                                if line.startswith("a=fingerprint:")]
+        for section in sections:
+            mid = next((line[6:] for line in section
+                        if line.startswith("a=mid:")), "unknown")
+            fingerprints = [line for line in section
+                            if line.startswith("a=fingerprint:")]
+            if not fingerprints:
+                fingerprints = session_fingerprints
+            if not fingerprints:
+                raise RuntimeError(
+                    f"Cloudflare SFU answer is missing DTLS fingerprint for MID {mid}; "
+                    "cannot establish WebRTC connection"
+                )
 
     @staticmethod
     def _log_parsed_remote_ice(sdp_text: str, pc: RTCPeerConnection) -> None:
