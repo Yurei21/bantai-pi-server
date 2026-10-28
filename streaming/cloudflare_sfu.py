@@ -216,6 +216,12 @@ class CloudflareSFUPublisher:
     @staticmethod
     def _normalize_bundled_answer_candidates(sdp_text: str) -> str:
         lines = sdp_text.splitlines()
+        session_transport_attributes = []
+        for line in lines:
+            if line.startswith("m="):
+                break
+            if line.startswith(("a=fingerprint:", "a=setup:")):
+                session_transport_attributes.append(line)
         bundle_mids = set()
         primary_mid = None
         in_session = True
@@ -251,6 +257,8 @@ class CloudflareSFUPublisher:
                       if line.startswith("a=candidate:")]
         transport_attributes = [line for line in primary_candidates[0]
                                 if line.startswith(("a=fingerprint:", "a=setup:"))]
+        if not transport_attributes:
+            transport_attributes = session_transport_attributes
         if not candidates:
             return sdp_text
         primary_ufrag = next((line for line in primary_candidates[0]
