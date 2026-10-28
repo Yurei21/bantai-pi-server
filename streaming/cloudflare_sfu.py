@@ -131,23 +131,23 @@ class CloudflareSFUPublisher:
                 raise
 
     @staticmethod
-    def _log_sdp_candidate_summary(sdp: str, label: str) -> None:
-        candidates = []
+    def _candidate_counts(sdp: str) -> str:
+        counts = {}
         for line in sdp.splitlines():
             if not line.startswith("a=candidate:"):
                 continue
             fields = line[2:].split()
             if len(fields) >= 8:
-                candidates.append((fields[6].lower(), fields[7].lower()))
-        counts = {}
-        for candidate_type, transport in candidates:
-            key = (candidate_type, transport)
-            counts[key] = counts.get(key, 0) + 1
-        summary = ", ".join(
+                key = (fields[7].lower(), fields[6].lower())
+                counts[key] = counts.get(key, 0) + 1
+        return ", ".join(
             f"{candidate_type}/{transport}={count}"
             for (candidate_type, transport), count in sorted(counts.items())
         ) or "none"
-        logger.info("SFU %s ICE candidates: %s", label, summary)
+
+    @staticmethod
+    def _log_sdp_candidate_summary(sdp: str, label: str) -> None:
+        logger.info("SFU %s ICE candidates: %s", label, CloudflareSFUPublisher._candidate_counts(sdp))
 
     @staticmethod
     def _log_peer_connection(pc: RTCPeerConnection, label: str) -> None:
