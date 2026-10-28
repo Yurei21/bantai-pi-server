@@ -281,7 +281,7 @@ class CloudflareSFUPublisher:
                 section.append("a=end-of-candidates")
                 changed = True
             normalized.extend(section)
-        return "\\r\\n".join(normalized) + "\\r\\n" if changed else sdp_text
+        return "\r\n".join(normalized) + "\r\n" if changed else sdp_text
 
     @staticmethod
     def _log_parsed_remote_ice(sdp_text: str, pc: RTCPeerConnection) -> None:
