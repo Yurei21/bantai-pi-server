@@ -121,6 +121,7 @@ class CloudflareSFUPublisher:
                 if errors:
                     raise RuntimeError("SFU track publish failed: " + "; ".join(item.get("errorDescription", item["errorCode"]) for item in errors))
                 answer_sdp = description.get("sdp", "")
+                logger.info("SFU publisher Cloudflare session description type=%s", description.get("type"))
                 self._log_sdp_candidate_summary(answer_sdp, "publisher Cloudflare answer")
                 normalized_sdp = self._normalize_bundled_answer_candidates(answer_sdp)
                 if normalized_sdp != answer_sdp:
@@ -179,13 +180,20 @@ class CloudflareSFUPublisher:
     @staticmethod
     def _log_sdp_candidate_summary(sdp: str, label: str) -> None:
         logger.info("SFU %s ICE candidates: %s", label, CloudflareSFUPublisher._candidate_counts(sdp))
+        session_fingerprints = 0
+        session_setup = 0
         media_sections = []
         current = None
         for line in sdp.splitlines():
+            if current is None:
+                if line.startswith("a=fingerprint:"):
+                    session_fingerprints += 1
+                elif line.startswith("a=setup:"):
+                    session_setup += 1
             if line.startswith("m="):
                 if current is not None:
                     media_sections.append(current)
-                current = {"mid": None, "ice_ufrag": False, "ice_pwd": False, "candidates": 0, "end_of_candidates": False}
+                current = {"mid": None, "ice_ufrag": False, "ice_pwd": False, "fingerprints": 0, "setup": False, "candidates": 0, "end_of_candidates": False}
             elif current is not None:
                 if line.startswith("a=mid:"):
                     current["mid"] = line[6:]
@@ -193,12 +201,23 @@ class CloudflareSFUPublisher:
                     current["ice_ufrag"] = True
                 elif line.startswith("a=ice-pwd:"):
                     current["ice_pwd"] = True
+                elif line.startswith("a=fingerprint:"):
+                    current["fingerprints"] += 1
+                elif line.startswith("a=setup:"):
+                    current["setup"] = True
                 elif line.startswith("a=candidate:"):
                     current["candidates"] += 1
                 elif line == "a=end-of-candidates":
                     current["end_of_candidates"] = True
         if current is not None:
             media_sections.append(current)
+        logger.info(
+            "SFU %s SDP DTLS structure: session_fingerprints=%d session_setup=%d media=%s",
+            label,
+            session_fingerprints,
+            session_setup,
+            [{"mid": item["mid"], "fingerprints": item["fingerprints"], "setup": item["setup"]} for item in media_sections],
+        )
         logger.info("SFU %s SDP ICE structure (values omitted): %s", label, media_sections or "no media sections")
 
     @staticmethod
