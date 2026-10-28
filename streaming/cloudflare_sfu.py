@@ -209,21 +209,38 @@ class CloudflareSFUPublisher:
             logger.info("SFU %s peer connection state: %s", label, pc.connectionState)
 
     @staticmethod
+    def _log_remote_ice_configuration(pc: RTCPeerConnection) -> None:
+        for index, transport in enumerate(pc._RTCPeerConnection__iceTransports):
+            connection = transport._connection
+            remote_candidates = list(connection.remote_candidates)
+            logger.info(
+                "SFU ICE remote configuration transport=%d role=%s remote_candidates=%d candidates=%s",
+                index,
+                connection.ice_controlling,
+                len(remote_candidates),
+                [
+                    {
+                        "type": candidate.type,
+                        "protocol": candidate.transport,
+                        "address_family": 6 if ":" in candidate.host else 4,
+                        "port": candidate.port,
+                    }
+                    for candidate in remote_candidates
+                ],
+            )
+
+    @staticmethod
     async def _log_ice_checklist(pc: RTCPeerConnection) -> None:
         try:
-            await asyncio.sleep(0)
-            transports = list(pc._RTCPeerConnection__iceTransports)
-            for index, transport in enumerate(transports):
-                connection = transport._connection
-                checklist = getattr(connection, "_check_list", None)
-                if checklist is None:
-                    checklist = getattr(connection, "check_list", None)
-                logger.info(
-                    "SFU ICE checklist transport=%d state=%s remote_candidates=%d pairs=%s",
-                    index,
-                    transport.state,
-                    len(connection.remote_candidates),
-                    [
+            last_states = {}
+            while pc.connectionState not in ("connected", "failed", "closed"):
+                transports = list(pc._RTCPeerConnection__iceTransports)
+                for index, transport in enumerate(transports):
+                    connection = transport._connection
+                    checklist = getattr(connection, "_check_list", None)
+                    if checklist is None:
+                        checklist = getattr(connection, "check_list", None)
+                    pairs = [
                         {
                             "state": pair.state,
                             "nominated": pair.nominated,
@@ -233,11 +250,18 @@ class CloudflareSFUPublisher:
                             "remote_protocol": pair.remote_candidate.transport,
                         }
                         for pair in (checklist or [])
-                    ],
-                )
-                if not checklist:
-                    logger.info("SFU ICE checklist transport=%d is empty or unavailable", index)
-                await asyncio.sleep(1)
+                    ]
+                    state_key = (transport.state, tuple((p["state"], p["nominated"]) for p in pairs))
+                    if last_states.get(index) != state_key:
+                        logger.info(
+                            "SFU ICE checklist transport=%d state=%s remote_candidates=%d pairs=%s",
+                            index,
+                            transport.state,
+                            len(connection.remote_candidates),
+                            pairs if checklist is not None else "unavailable",
+                        )
+                        last_states[index] = state_key
+                await asyncio.sleep(0.5)
         except asyncio.CancelledError:
             raise
         except Exception:
