@@ -122,6 +122,8 @@ class CloudflareSFUPublisher:
                     raise RuntimeError("SFU track publish failed: " + "; ".join(item.get("errorDescription", item["errorCode"]) for item in errors))
                 self._log_sdp_candidate_summary(description.get("sdp", ""), "publisher Cloudflare answer")
                 await pc.setRemoteDescription(RTCSessionDescription(**description))
+                if self.ice_debug:
+                    self._log_remote_ice_configuration(pc)
                 self.pc = pc
                 self.session_id = session_id
                 logger.info("SFU publisher negotiation submitted; waiting for ICE connection")
