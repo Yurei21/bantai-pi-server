@@ -150,6 +150,7 @@ class CloudflareSFUPublisher:
                 )
                 return {"session_id": session_id, "tracks": list(tracks)}
             except Exception:
+                logger.exception("Cloudflare SFU publisher setup failed")
                 await pc.close()
                 if session_id:
                     try:
