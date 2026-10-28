@@ -204,9 +204,13 @@ async def offer(request: Request):
     
     if not camera_manager.running:
         camera_manager.start_all([0, 1])
+    if not camera_manager.get_all_pipelines():
+        raise HTTPException(status_code=503, detail="No camera pipelines are available")
     
-    answer = await webrtc_manager.create_peer_connection(offer_sdp, offer_type, camera_manager)
-    return answer
+    try:
+        return await webrtc_manager.create_peer_connection(offer_sdp, offer_type, camera_manager)
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
 
 @router.get("/stream/mjpeg/{camera_id}")
 async def mjpeg_stream(camera_id: int):
