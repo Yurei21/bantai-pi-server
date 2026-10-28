@@ -71,7 +71,9 @@ This Tunnel route exposes HTTP/WebSocket signaling and API access without home-r
 
 Copy `.env.example` to `.env` on the Pi and set `CF_SFU_APP_ID` and `CF_SFU_APP_SECRET` locally. `.env` is ignored by Git. These are server-side credentials; never put them in Flutter, the PC viewer, or source control. The Pi must have outbound internet access to Cloudflare Realtime. The PC's two ML pipelines can subscribe to the separate `cam0` and `cam1` tracks from the SFU; the Tunnel is for authenticated signaling/API only.
 
-The current `/offer` endpoint is direct Pi-to-client WebRTC, not an SFU publisher/subscriber flow. Do not use it for remote ML yet; the SFU integration and PC subscriber still need implementation.
+`/offer` remains direct Pi-to-client WebRTC for local clients. Remote ML uses separate SFU endpoints: `POST /api/sfu/publish` publishes `cam0` and `cam1`; the PC subscriber calls `POST /api/sfu/subscribe` and `PUT /api/sfu/subscribe/{subscriber_session_id}/answer`. The Pi proxies all SFU API calls and retains the App Secret. Protect these endpoints with the Cloudflare Access application and a service-token policy; never publish them without Access. The PC subscriber requires Access service-token credentials configured only in its local `.env`.
+
+In the PC repository, copy `.env.example` to `.env`, set `PI_API_URL` to the Access-protected Pi hostname and configure the Access service token. Run `docker compose --env-file .env -f docker/docker-compose.yml up --build`. The subscriber publishes received `cam0` and `cam1` as local RTSP streams at `rtsp://rtsp-server:8554/cam0` and `/cam1`; the orchestrator defaults to these paths. Keep Cloudflare Realtime media on its WebRTC connection; Tunnel carries signaling only.
 
 See Cloudflare's [Tunnel setup guide](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/get-started/create-remote-tunnel/) and [Access self-hosted application guide](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/self-hosted-public-app/).
 

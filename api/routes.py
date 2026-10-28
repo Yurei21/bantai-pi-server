@@ -10,6 +10,7 @@ from core.manager import manager
 from cameras.pipeline import camera_manager
 from recording.recorder import recorder_manager
 from streaming.webrtc import webrtc_manager
+from streaming.cloudflare_sfu import sfu_publisher
 from config.settings import CAMERA_DEVICES, CLIPS_DIR
 
 logger = logging.getLogger("bantai-server")
@@ -211,6 +212,86 @@ async def offer(request: Request):
         return await webrtc_manager.create_peer_connection(offer_sdp, offer_type, camera_manager)
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
+
+@router.post("/api/sfu/publish")
+async def start_sfu_publish():
+    if not sfu_publisher.configured:
+        raise HTTPException(status_code=503, detail="Cloudflare SFU credentials are not configured")
+    if not camera_manager.running:
+        camera_manager.start_all([0, 1])
+    try:
+        return await sfu_publisher.start(camera_manager)
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+    except Exception as e:
+        logger.exception("Failed to publish camera tracks to Cloudflare SFU")
+        raise HTTPException(status_code=502, detail="Cloudflare SFU publication failed") from e
+
+
+@router.delete("/api/sfu/publish")
+async def stop_sfu_publish():
+    await sfu_publisher.stop()
+    return {"status": "stopped"}
+
+
+@router.post("/api/sfu/subscribe")
+async def create_sfu_subscription(request: Request):
+    body = await request.json()
+    publisher_session_id = body.get("publisher_session_id")
+    if not publisher_session_id:
+        raise HTTPException(status_code=400, detail="Missing publisher_session_id")
+    if not sfu_publisher.configured:
+        raise HTTPException(status_code=503, detail="Cloudflare SFU credentials are not configured")
+    subscriber_id = None
+    try:
+        session = await sfu_publisher._request("POST", "/sessions/new")
+        subscriber_id = session["sessionId"]
+        result = await sfu_publisher._request(
+            "POST", f"/sessions/{subscriber_id}/tracks/new",
+            json={"tracks": [
+                {"location": "remote", "sessionId": publisher_session_id, "trackName": "cam0"},
+                {"location": "remote", "sessionId": publisher_session_id, "trackName": "cam1"},
+            ]},
+        )
+        errors = [track for track in result.get("tracks", []) if track.get("errorCode")]
+        if errors or not result.get("sessionDescription"):
+            raise RuntimeError("SFU subscription request failed")
+        return {"subscriber_session_id": subscriber_id, **result}
+    except Exception as e:
+        if subscriber_id:
+            try:
+                await sfu_publisher._close_session(subscriber_id)
+            except Exception:
+                logger.warning("Could not clean up failed SFU subscriber session %s", subscriber_id)
+        logger.exception("Failed to create Cloudflare SFU subscription")
+        raise HTTPException(status_code=502, detail="Cloudflare SFU subscription failed") from e
+
+
+@router.put("/api/sfu/subscribe/{subscriber_session_id}/answer")
+async def answer_sfu_subscription(subscriber_session_id: str, request: Request):
+    body = await request.json()
+    description = body.get("sessionDescription")
+    if not description or description.get("type") != "answer" or not description.get("sdp"):
+        raise HTTPException(status_code=400, detail="Missing answer sessionDescription")
+    try:
+        return await sfu_publisher._request(
+            "PUT", f"/sessions/{subscriber_session_id}/renegotiate",
+            json={"sessionDescription": description},
+        )
+    except Exception as e:
+        logger.exception("Failed to complete Cloudflare SFU subscription")
+        raise HTTPException(status_code=502, detail="Cloudflare SFU renegotiation failed") from e
+
+
+@router.delete("/api/sfu/subscribe/{subscriber_session_id}")
+async def close_sfu_subscription(subscriber_session_id: str):
+    try:
+        await sfu_publisher._close_session(subscriber_session_id)
+        return {"status": "closed"}
+    except Exception as e:
+        logger.exception("Failed to close Cloudflare SFU subscription")
+        raise HTTPException(status_code=502, detail="Cloudflare SFU subscription cleanup failed") from e
+
 
 @router.get("/stream/mjpeg/{camera_id}")
 async def mjpeg_stream(camera_id: int):

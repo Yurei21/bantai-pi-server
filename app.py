@@ -3,6 +3,9 @@ import logging
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from api.routes import router
 from config.settings import HOST, PORT, ALLOWED_ORIGINS
@@ -43,6 +46,8 @@ async def shutdown_event():
     recorder_manager.stop_all()
     camera_manager.stop_all()
     await webrtc_manager.close_all()
+    from streaming.cloudflare_sfu import sfu_publisher
+    await sfu_publisher.stop()
 
 if __name__ == "__main__":
     logger.info(f"Starting server on {HOST}:{PORT}")
