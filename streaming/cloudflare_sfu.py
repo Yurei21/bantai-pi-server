@@ -308,6 +308,16 @@ class CloudflareSFUPublisher:
         parsed = SessionDescription.parse(sdp_text)
         parsed_transports = {}
         for index, media in enumerate(parsed.media):
+            dtls = getattr(media, "dtls", None)
+            fingerprints = getattr(dtls, "fingerprints", None) or []
+            setup = getattr(dtls, "role", None)
+            logger.info(
+                "SFU remote DTLS SDP media index=%d mid=%s fingerprints=%d setup_present=%s",
+                index,
+                getattr(getattr(media, "rtp", None), "muxId", None),
+                len(fingerprints),
+                setup is not None,
+            )
             mid = media.rtp.muxId
             count = len(media.ice_candidates)
             parsed_transports.setdefault(mid, []).append(count)
@@ -319,6 +329,16 @@ class CloudflareSFUPublisher:
                 media.ice_candidates_complete,
             )
 
+        remote_dtls = getattr(pc, "_RTCPeerConnection__remoteDtls", {})
+        for index, (transceiver, parameters) in enumerate(remote_dtls.items()):
+            fingerprints = getattr(parameters, "fingerprints", None) or []
+            logger.info(
+                "SFU aiortc remote DTLS parameters index=%d mid=%s fingerprints=%d role_present=%s",
+                index,
+                getattr(transceiver, "mid", None),
+                len(fingerprints),
+                getattr(parameters, "role", None) is not None,
+            )
         logger.info("SFU parsed remote ICE candidate counts by MID: %s", parsed_transports)
         for index, transport in enumerate(pc._RTCPeerConnection__iceTransports):
             remote_candidates = list(transport._connection.remote_candidates)
