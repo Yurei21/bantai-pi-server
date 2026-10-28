@@ -55,6 +55,26 @@ Commands:
 - `GET /api/clips` - List recorded clips
 - `GET /stream/mjpeg/{camera_id}` - MJPEG preview (0 or 1)
 
+## Exposing the Pi server with Cloudflare Tunnel
+
+`cloudflared` runs as a separate service on the Raspberry Pi; the Python application does not create a Tunnel. Use a remotely managed Tunnel so the connector can reconnect automatically and configuration stays in Cloudflare.
+
+1. Install `cloudflared` on Raspberry Pi OS using Cloudflare's [official installation instructions](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/downloads/).
+2. In Cloudflare Zero Trust, create a new Tunnel under **Networking > Tunnels**. Choose the Linux architecture for the Pi and run the generated install command **on the Pi**. Treat the command and token as secrets; do not commit or share them. Do not reuse the PC's Tunnel token.
+3. In **Access controls > Applications**, create a **Self-hosted** application for the public hostname and add an Allow policy restricted to your email or identity. Create the Access application before publishing the hostname.
+4. In the Tunnel's **Routes**, add a **Published application** route using that same hostname and service URL `http://localhost:8000`.
+5. Start this server on the Pi. Confirm the Tunnel reports **Healthy**, then test the hostname from a private browser window: it should prompt for Cloudflare Access before showing the server.
+
+This Tunnel route exposes HTTP/WebSocket signaling and API access without home-router port forwarding. It does **not** proxy WebRTC media packets or make them traverse the Tunnel. Cloudflare Realtime SFU publishing/subscription must be configured separately for internet video delivery. Restrict API access and never put SFU app secrets in browser code.
+
+### SFU credentials
+
+Copy `.env.example` to `.env` on the Pi and set `CF_SFU_APP_ID` and `CF_SFU_APP_SECRET` locally. `.env` is ignored by Git. These are server-side credentials; never put them in Flutter, the PC viewer, or source control. The Pi must have outbound internet access to Cloudflare Realtime. The PC's two ML pipelines can subscribe to the separate `cam0` and `cam1` tracks from the SFU; the Tunnel is for authenticated signaling/API only.
+
+The current `/offer` endpoint is direct Pi-to-client WebRTC, not an SFU publisher/subscriber flow. Do not use it for remote ML yet; the SFU integration and PC subscriber still need implementation.
+
+See Cloudflare's [Tunnel setup guide](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/get-started/create-remote-tunnel/) and [Access self-hosted application guide](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/self-hosted-public-app/).
+
 ## Flutter App Integration
 When Flutter app sends payload to turn on stream:
 1. Send `{"command": "start_streaming"}` via WebSocket

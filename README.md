@@ -11,6 +11,8 @@ Local server for Raspberry Pi to connect with Flutter app via hotspot. Supports:
 ./start_server.sh
 ```
 
+For Cloudflare Realtime SFU, copy `.env.example` to `.env` on the Pi and set `CF_SFU_APP_ID` and `CF_SFU_APP_SECRET` locally. Never commit or share `.env`; it contains the server-side SFU secret. The Pi server does not yet publish camera tracks through the SFU.
+
 Server runs on `http://0.0.0.0:8000`
 
 ## Endpoints
