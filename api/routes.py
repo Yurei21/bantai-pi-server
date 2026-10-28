@@ -253,7 +253,15 @@ async def create_sfu_subscription(request: Request):
                 {"location": "remote", "sessionId": publisher_session_id, "trackName": "cam1"},
             ]},
         )
-        errors = [track for track in result.get("tracks", []) if track.get("errorCode")]
+        track_results = result.get("tracks", [])
+        errors = [
+            {key: track.get(key) for key in ("mid", "trackName", "errorCode", "errorDescription") if track.get(key) is not None}
+            for track in track_results if track.get("errorCode")
+        ]
+        if errors:
+            logger.error("Cloudflare SFU rejected subscription tracks: %s", errors)
+        if not result.get("sessionDescription"):
+            logger.error("Cloudflare SFU subscription response omitted session description; track results: %s", track_results)
         if errors or not result.get("sessionDescription"):
             raise RuntimeError("SFU subscription request failed")
         return {"subscriber_session_id": subscriber_id, **result}
