@@ -120,9 +120,11 @@ class CloudflareSFUPublisher:
                 errors = [item for item in results if item.get("errorCode")]
                 if errors:
                     raise RuntimeError("SFU track publish failed: " + "; ".join(item.get("errorDescription", item["errorCode"]) for item in errors))
-                self._log_sdp_candidate_summary(description.get("sdp", ""), "publisher Cloudflare answer")
+                answer_sdp = description.get("sdp", "")
+                self._log_sdp_candidate_summary(answer_sdp, "publisher Cloudflare answer")
                 await pc.setRemoteDescription(RTCSessionDescription(**description))
                 if self.ice_debug:
+                    self._log_parsed_remote_ice(answer_sdp, pc)
                     self._log_remote_ice_configuration(pc)
                 self.pc = pc
                 self.session_id = session_id
@@ -207,6 +209,42 @@ class CloudflareSFUPublisher:
         @pc.on("connectionstatechange")
         async def on_connection_state_change():
             logger.info("SFU %s peer connection state: %s", label, pc.connectionState)
+
+    @staticmethod
+    def _log_parsed_remote_ice(sdp_text: str, pc: RTCPeerConnection) -> None:
+        from aiortc.sdp import SessionDescription
+
+        parsed = SessionDescription.parse(sdp_text)
+        parsed_transports = {}
+        for index, media in enumerate(parsed.media):
+            mid = media.rtp.muxId
+            count = len(media.ice_candidates)
+            parsed_transports.setdefault(mid, []).append(count)
+            logger.info(
+                "SFU parsed remote ICE media index=%d mid=%s candidates=%d end_of_candidates=%s",
+                index,
+                mid,
+                count,
+                media.ice_candidates_complete,
+            )
+
+        logger.info("SFU parsed remote ICE candidate counts by MID: %s", parsed_transports)
+        for index, transport in enumerate(pc._RTCPeerConnection__iceTransports):
+            remote_candidates = list(transport._connection.remote_candidates)
+            logger.info(
+                "SFU parsed-to-transport ICE comparison transport=%d remote_candidates=%d candidate_details=%s",
+                index,
+                len(remote_candidates),
+                [
+                    {
+                        "type": candidate.type,
+                        "protocol": candidate.transport,
+                        "address_family": 6 if ":" in candidate.host else 4,
+                        "port": candidate.port,
+                    }
+                    for candidate in remote_candidates
+                ],
+            )
 
     @staticmethod
     def _log_remote_ice_configuration(pc: RTCPeerConnection) -> None:
