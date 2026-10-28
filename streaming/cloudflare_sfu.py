@@ -84,6 +84,7 @@ class CloudflareSFUPublisher:
                 offer = await pc.createOffer()
                 await pc.setLocalDescription(offer)
                 await self._wait_for_ice(pc)
+                self._log_sdp_candidate_summary(pc.localDescription.sdp, "publisher local offer")
 
                 session = await self._request("POST", "/sessions/new")
                 session_id = session["sessionId"]
@@ -104,6 +105,7 @@ class CloudflareSFUPublisher:
                 errors = [item for item in results if item.get("errorCode")]
                 if errors:
                     raise RuntimeError("SFU track publish failed: " + "; ".join(item.get("errorDescription", item["errorCode"]) for item in errors))
+                self._log_sdp_candidate_summary(description.get("sdp", ""), "publisher Cloudflare answer")
                 await pc.setRemoteDescription(RTCSessionDescription(**description))
                 self.pc = pc
                 self.session_id = session_id
@@ -127,6 +129,25 @@ class CloudflareSFUPublisher:
                     except Exception:
                         logger.warning("Could not clean up failed SFU session %s", session_id)
                 raise
+
+    @staticmethod
+    def _log_sdp_candidate_summary(sdp: str, label: str) -> None:
+        candidates = []
+        for line in sdp.splitlines():
+            if not line.startswith("a=candidate:"):
+                continue
+            fields = line[2:].split()
+            if len(fields) >= 8:
+                candidates.append((fields[6].lower(), fields[7].lower()))
+        counts = {}
+        for candidate_type, transport in candidates:
+            key = (candidate_type, transport)
+            counts[key] = counts.get(key, 0) + 1
+        summary = ", ".join(
+            f"{candidate_type}/{transport}={count}"
+            for (candidate_type, transport), count in sorted(counts.items())
+        ) or "none"
+        logger.info("SFU %s ICE candidates: %s", label, summary)
 
     @staticmethod
     def _log_peer_connection(pc: RTCPeerConnection, label: str) -> None:
@@ -153,7 +174,16 @@ class CloudflareSFUPublisher:
             if pc.connectionState in ("connected", "failed", "closed"):
                 event.set()
 
-        await asyncio.wait_for(event.wait(), timeout=timeout)
+        try:
+            await asyncio.wait_for(event.wait(), timeout=timeout)
+        except asyncio.TimeoutError:
+            logger.error(
+                "SFU publisher ICE timed out (ICE=%s, peer=%s, local_candidates=%s)",
+                pc.iceConnectionState,
+                pc.connectionState,
+                self._candidate_counts(pc.localDescription.sdp if pc.localDescription else ""),
+            )
+            raise
 
     async def _monitor_connection(self, pc: RTCPeerConnection, session_id: str) -> None:
         logger.info("SFU publisher monitoring connection (ICE=%s, peer=%s)", pc.iceConnectionState, pc.connectionState)
