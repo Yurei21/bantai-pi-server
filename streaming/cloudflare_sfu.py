@@ -249,6 +249,8 @@ class CloudflareSFUPublisher:
             return sdp_text
         candidates = [line for line in primary_candidates[0]
                       if line.startswith("a=candidate:")]
+        transport_attributes = [line for line in primary_candidates[0]
+                                if line.startswith(("a=fingerprint:", "a=setup:"))]
         if not candidates:
             return sdp_text
         primary_ufrag = next((line for line in primary_candidates[0]
@@ -269,8 +271,16 @@ class CloudflareSFUPublisher:
                                 if line.startswith("a=ice-pwd:")), None)
             if section_ufrag != primary_ufrag or section_pwd != primary_pwd:
                 continue
-            existing = {line for line in section if line.startswith("a=candidate:")}
-            missing = [line for line in candidates if line not in existing]
+            existing_candidates = {line for line in section if line.startswith("a=candidate:")}
+            existing_transport_attributes = {
+                line for line in section
+                if line.startswith(("a=fingerprint:", "a=setup:"))
+            }
+            missing = [line for line in candidates if line not in existing_candidates]
+            missing.extend(
+                line for line in transport_attributes
+                if line not in existing_transport_attributes
+            )
             if missing:
                 insert_at = next((i for i, line in enumerate(section)
                                   if line == "a=end-of-candidates"), len(section))
