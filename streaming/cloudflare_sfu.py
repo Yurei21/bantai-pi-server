@@ -52,6 +52,7 @@ class CloudflareSFUPublisher:
                 raise RuntimeError("Both camera pipelines must be running")
 
             pc = RTCPeerConnection(RTCConfiguration(iceServers=[RTCIceServer(urls=["stun:stun.cloudflare.com:3478"])]))
+            self._log_peer_connection(pc, "publisher")
             session_id = None
             try:
                 tracks = {}
@@ -98,19 +99,36 @@ class CloudflareSFUPublisher:
                 raise
 
     @staticmethod
+    def _log_peer_connection(pc: RTCPeerConnection, label: str) -> None:
+        @pc.on("icegatheringstatechange")
+        async def on_ice_gathering_state_change():
+            logger.info("SFU %s ICE gathering state: %s", label, pc.iceGatheringState)
+
+        @pc.on("iceconnectionstatechange")
+        async def on_ice_connection_state_change():
+            logger.info("SFU %s ICE connection state: %s", label, pc.iceConnectionState)
+
+        @pc.on("connectionstatechange")
+        async def on_connection_state_change():
+            logger.info("SFU %s peer connection state: %s", label, pc.connectionState)
+
+    @staticmethod
     async def _wait_for_connection(pc: RTCPeerConnection, timeout: float = 30) -> None:
+        logger.info("SFU publisher waiting for connection (ICE=%s, peer=%s)", pc.iceConnectionState, pc.connectionState)
         if pc.connectionState == "connected":
             return
         event = asyncio.Event()
         @pc.on("connectionstatechange")
         async def on_connection_state_change():
-            if pc.connectionState == "connected":
+            if pc.connectionState in ("connected", "failed", "closed"):
                 event.set()
-            elif pc.connectionState in ("failed", "closed"):
-                event.set()
-        await asyncio.wait_for(event.wait(), timeout)
+        try:
+            await asyncio.wait_for(event.wait(), timeout)
+        except asyncio.TimeoutError:
+            logger.error("SFU publisher connection timed out (ICE=%s, peer=%s)", pc.iceConnectionState, pc.connectionState)
+            raise
         if pc.connectionState != "connected":
-            raise RuntimeError(f"SFU publisher connection ended in state {pc.connectionState}")
+            raise RuntimeError(f"SFU publisher connection ended in state {pc.connectionState} (ICE={pc.iceConnectionState})")
 
     @staticmethod
     async def _wait_for_ice(pc: RTCPeerConnection, timeout: float = 20) -> None:
