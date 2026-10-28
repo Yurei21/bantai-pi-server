@@ -5,6 +5,7 @@ from typing import Any
 
 import httpx
 from aiortc import RTCConfiguration, RTCIceServer, RTCPeerConnection, RTCSessionDescription
+from aiortc.rtcicetransport import connection_kwargs
 
 from streaming.webrtc import CameraVideoTrack
 
@@ -71,6 +72,15 @@ class CloudflareSFUPublisher:
                 logger.info("SFU publisher configured with TURN relay (%d URL(s))", len(self.turn_urls))
             else:
                 logger.warning("SFU publisher has no TURN server configured; using STUN only")
+            turn_options = connection_kwargs(ice_servers)
+            if "turn_server" in turn_options:
+                logger.info(
+                    "SFU publisher TURN transport configured: server=%s:%s transport=%s tls=%s",
+                    turn_options["turn_server"][0],
+                    turn_options["turn_server"][1],
+                    turn_options["turn_transport"],
+                    turn_options["turn_ssl"],
+                )
             pc = RTCPeerConnection(RTCConfiguration(iceServers=ice_servers))
             self._log_peer_connection(pc, "publisher")
             session_id = None
