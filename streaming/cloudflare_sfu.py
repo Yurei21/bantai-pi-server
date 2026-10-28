@@ -107,11 +107,17 @@ class CloudflareSFUPublisher:
                 await pc.setRemoteDescription(RTCSessionDescription(**description))
                 self.pc = pc
                 self.session_id = session_id
+                logger.info("SFU publisher negotiation submitted; waiting for ICE connection")
+                await self._wait_for_connection(pc, timeout=60)
+                if pc.connectionState != "connected":
+                    raise RuntimeError(
+                        f"SFU publisher failed to connect (ICE={pc.iceConnectionState}, peer={pc.connectionState})"
+                    )
+                logger.info("SFU publisher connected; tracks ready for subscription")
                 self._connection_task = asyncio.create_task(
                     self._monitor_connection(pc, session_id),
                     name=f"sfu-publisher-{session_id[:8]}",
                 )
-                logger.info("SFU publisher negotiation submitted; awaiting subscriber connection asynchronously")
                 return {"session_id": session_id, "tracks": list(tracks)}
             except Exception:
                 await pc.close()
@@ -135,6 +141,19 @@ class CloudflareSFUPublisher:
         @pc.on("connectionstatechange")
         async def on_connection_state_change():
             logger.info("SFU %s peer connection state: %s", label, pc.connectionState)
+
+    @staticmethod
+    async def _wait_for_connection(pc: RTCPeerConnection, timeout: float) -> None:
+        if pc.connectionState in ("connected", "failed", "closed"):
+            return
+        event = asyncio.Event()
+
+        @pc.on("connectionstatechange")
+        async def on_connection_state_change():
+            if pc.connectionState in ("connected", "failed", "closed"):
+                event.set()
+
+        await asyncio.wait_for(event.wait(), timeout=timeout)
 
     async def _monitor_connection(self, pc: RTCPeerConnection, session_id: str) -> None:
         logger.info("SFU publisher monitoring connection (ICE=%s, peer=%s)", pc.iceConnectionState, pc.connectionState)
