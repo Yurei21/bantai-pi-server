@@ -137,8 +137,10 @@ class CloudflareSFUPublisher:
             if not line.startswith("a=candidate:"):
                 continue
             fields = line[2:].split()
-            if len(fields) >= 8:
-                key = (fields[7].lower(), fields[6].lower())
+            if len(fields) >= 8 and fields[6].lower() == "typ":
+                candidate_type = fields[7].lower()
+                transport = fields[2].lower()
+                key = (candidate_type, transport)
                 counts[key] = counts.get(key, 0) + 1
         return ", ".join(
             f"{candidate_type}/{transport}={count}"
@@ -181,7 +183,9 @@ class CloudflareSFUPublisher:
                 "SFU publisher ICE timed out (ICE=%s, peer=%s, local_candidates=%s)",
                 pc.iceConnectionState,
                 pc.connectionState,
-                self._candidate_counts(pc.localDescription.sdp if pc.localDescription else ""),
+                CloudflareSFUPublisher._candidate_counts(
+                    pc.localDescription.sdp if pc.localDescription else ""
+                ),
             )
             raise
 
