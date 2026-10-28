@@ -122,9 +122,12 @@ class CloudflareSFUPublisher:
                     raise RuntimeError("SFU track publish failed: " + "; ".join(item.get("errorDescription", item["errorCode"]) for item in errors))
                 answer_sdp = description.get("sdp", "")
                 self._log_sdp_candidate_summary(answer_sdp, "publisher Cloudflare answer")
-                await pc.setRemoteDescription(RTCSessionDescription(**description))
+                normalized_sdp = self._normalize_bundled_answer_candidates(answer_sdp)
+                if normalized_sdp != answer_sdp:
+                    logger.info("SFU publisher copied bundled ICE candidates across BUNDLE media sections for aiortc")
+                await pc.setRemoteDescription(RTCSessionDescription(sdp=normalized_sdp, type=description["type"]))
                 if self.ice_debug:
-                    self._log_parsed_remote_ice(answer_sdp, pc)
+                    self._log_parsed_remote_ice(normalized_sdp, pc)
                     self._log_remote_ice_configuration(pc)
                 self.pc = pc
                 self.session_id = session_id
@@ -209,6 +212,76 @@ class CloudflareSFUPublisher:
         @pc.on("connectionstatechange")
         async def on_connection_state_change():
             logger.info("SFU %s peer connection state: %s", label, pc.connectionState)
+
+    @staticmethod
+    def _normalize_bundled_answer_candidates(sdp_text: str) -> str:
+        lines = sdp_text.splitlines()
+        bundle_mids = set()
+        primary_mid = None
+        in_session = True
+        for line in lines:
+            if line.startswith("m="):
+                in_session = False
+            elif in_session and line.startswith("a=group:BUNDLE "):
+                mids = line.split()[1:]
+                if mids:
+                    primary_mid = mids[0]
+                    bundle_mids.update(mids)
+
+        if primary_mid is None or len(bundle_mids) < 2:
+            return sdp_text
+
+        sections = []
+        section = []
+        for line in lines:
+            if line.startswith("m="):
+                if section:
+                    sections.append(section)
+                section = [line]
+            elif section:
+                section.append(line)
+        if section:
+            sections.append(section)
+
+        primary_candidates = [line for line in sections
+                               if any(item == f"a=mid:{primary_mid}" for item in line)]
+        if not primary_candidates:
+            return sdp_text
+        candidates = [line for line in primary_candidates[0]
+                      if line.startswith("a=candidate:")]
+        if not candidates:
+            return sdp_text
+        primary_ufrag = next((line for line in primary_candidates[0]
+                              if line.startswith("a=ice-ufrag:")), None)
+        primary_pwd = next((line for line in primary_candidates[0]
+                            if line.startswith("a=ice-pwd:")), None)
+
+        changed = False
+        normalized = []
+        for section in sections:
+            mid = next((item[6:] for item in section if item.startswith("a=mid:")), None)
+            if mid not in bundle_mids or mid == primary_mid:
+                normalized.extend(section)
+                continue
+            section_ufrag = next((line for line in section
+                                  if line.startswith("a=ice-ufrag:")), None)
+            section_pwd = next((line for line in section
+                                if line.startswith("a=ice-pwd:")), None)
+            if section_ufrag != primary_ufrag or section_pwd != primary_pwd:
+                continue
+            existing = {line for line in section if line.startswith("a=candidate:")}
+            missing = [line for line in candidates if line not in existing]
+            if missing:
+                insert_at = next((i for i, line in enumerate(section)
+                                  if line == "a=end-of-candidates"), len(section))
+                section[insert_at:insert_at] = missing
+                changed = True
+            if "a=end-of-candidates" in section and "a=end-of-candidates" in primary_candidates[0]:
+                section.remove("a=end-of-candidates")
+                section.append("a=end-of-candidates")
+                changed = True
+            normalized.extend(section)
+        return "\\r\\n".join(normalized) + "\\r\\n" if changed else sdp_text
 
     @staticmethod
     def _log_parsed_remote_ice(sdp_text: str, pc: RTCPeerConnection) -> None:
