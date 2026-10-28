@@ -10,6 +10,8 @@ from aiortc.rtcicetransport import connection_kwargs
 from streaming.webrtc import CameraVideoTrack
 
 logger = logging.getLogger("bantai-server")
+logging.getLogger("aiortc").setLevel(logging.DEBUG)
+logging.getLogger("aiortc.rtcicetransport").setLevel(logging.DEBUG)
 
 
 class CloudflareSFUPublisher:
