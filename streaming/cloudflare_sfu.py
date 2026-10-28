@@ -166,6 +166,27 @@ class CloudflareSFUPublisher:
     @staticmethod
     def _log_sdp_candidate_summary(sdp: str, label: str) -> None:
         logger.info("SFU %s ICE candidates: %s", label, CloudflareSFUPublisher._candidate_counts(sdp))
+        media_sections = []
+        current = None
+        for line in sdp.splitlines():
+            if line.startswith("m="):
+                if current is not None:
+                    media_sections.append(current)
+                current = {"mid": None, "ice_ufrag": False, "ice_pwd": False, "candidates": 0, "end_of_candidates": False}
+            elif current is not None:
+                if line.startswith("a=mid:"):
+                    current["mid"] = line[6:]
+                elif line.startswith("a=ice-ufrag:"):
+                    current["ice_ufrag"] = True
+                elif line.startswith("a=ice-pwd:"):
+                    current["ice_pwd"] = True
+                elif line.startswith("a=candidate:"):
+                    current["candidates"] += 1
+                elif line == "a=end-of-candidates":
+                    current["end_of_candidates"] = True
+        if current is not None:
+            media_sections.append(current)
+        logger.info("SFU %s SDP ICE structure (values omitted): %s", label, media_sections or "no media sections")
 
     @staticmethod
     def _log_peer_connection(pc: RTCPeerConnection, label: str) -> None:
