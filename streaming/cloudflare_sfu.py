@@ -25,9 +25,7 @@ class CloudflareSFUPublisher:
             logging.getLogger("aioice").setLevel(logging.DEBUG)
             logging.getLogger("aioice.ice").setLevel(logging.DEBUG)
             logging.getLogger("aioice.turn").setLevel(logging.DEBUG)
-            logging.getLogger("aiortc").setLevel(logging.DEBUG)
-            logging.getLogger("aiortc.rtcicetransport").setLevel(logging.DEBUG)
-            logger.info("SFU publisher detailed ICE diagnostics enabled")
+            logger.info("SFU publisher ICE diagnostics enabled")
         logger.info(
             "SFU environment check: turn_urls=%d username_set=%s credential_set=%s",
             len(self.turn_urls), bool(self.turn_username), bool(self.turn_credential),
@@ -127,7 +125,12 @@ class CloudflareSFUPublisher:
                 self.pc = pc
                 self.session_id = session_id
                 logger.info("SFU publisher negotiation submitted; waiting for ICE connection")
-                await self._wait_for_connection(pc, timeout=60)
+                diagnostics_task = asyncio.create_task(self._log_ice_checklist(pc))
+                try:
+                    await self._wait_for_connection(pc, timeout=60)
+                finally:
+                    diagnostics_task.cancel()
+                    await asyncio.gather(diagnostics_task, return_exceptions=True)
                 if pc.connectionState != "connected":
                     raise RuntimeError(
                         f"SFU publisher failed to connect (ICE={pc.iceConnectionState}, peer={pc.connectionState})"
@@ -202,6 +205,41 @@ class CloudflareSFUPublisher:
         @pc.on("connectionstatechange")
         async def on_connection_state_change():
             logger.info("SFU %s peer connection state: %s", label, pc.connectionState)
+
+    @staticmethod
+    async def _log_ice_checklist(pc: RTCPeerConnection) -> None:
+        try:
+            await asyncio.sleep(0)
+            transports = list(pc._RTCPeerConnection__iceTransports)
+            for index, transport in enumerate(transports):
+                connection = transport._connection
+                checklist = getattr(connection, "_check_list", None)
+                if checklist is None:
+                    checklist = getattr(connection, "check_list", None)
+                logger.info(
+                    "SFU ICE checklist transport=%d state=%s remote_candidates=%d pairs=%s",
+                    index,
+                    transport.state,
+                    len(connection.remote_candidates),
+                    [
+                        {
+                            "state": pair.state,
+                            "nominated": pair.nominated,
+                            "local_type": pair.local_candidate.type,
+                            "local_protocol": pair.local_candidate.transport,
+                            "remote_type": pair.remote_candidate.type,
+                            "remote_protocol": pair.remote_candidate.transport,
+                        }
+                        for pair in (checklist or [])
+                    ],
+                )
+                if not checklist:
+                    logger.info("SFU ICE checklist transport=%d is empty or unavailable", index)
+                await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.warning("Could not inspect SFU ICE checklist", exc_info=True)
 
     @staticmethod
     async def _wait_for_connection(pc: RTCPeerConnection, timeout: float) -> None:
