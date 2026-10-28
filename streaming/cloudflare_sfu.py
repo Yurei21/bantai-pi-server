@@ -26,6 +26,7 @@ class CloudflareSFUPublisher:
         )
         self.pc: RTCPeerConnection | None = None
         self.session_id: str | None = None
+        self._connection_task: asyncio.Task | None = None
         self._lock = asyncio.Lock()
         self._http: httpx.AsyncClient | None = None
 
@@ -104,9 +105,13 @@ class CloudflareSFUPublisher:
                 if errors:
                     raise RuntimeError("SFU track publish failed: " + "; ".join(item.get("errorDescription", item["errorCode"]) for item in errors))
                 await pc.setRemoteDescription(RTCSessionDescription(**description))
-                await self._wait_for_connection(pc)
                 self.pc = pc
                 self.session_id = session_id
+                self._connection_task = asyncio.create_task(
+                    self._monitor_connection(pc, session_id),
+                    name=f"sfu-publisher-{session_id[:8]}",
+                )
+                logger.info("SFU publisher negotiation submitted; awaiting subscriber connection asynchronously")
                 return {"session_id": session_id, "tracks": list(tracks)}
             except Exception:
                 await pc.close()
@@ -131,24 +136,42 @@ class CloudflareSFUPublisher:
         async def on_connection_state_change():
             logger.info("SFU %s peer connection state: %s", label, pc.connectionState)
 
-    @staticmethod
-    async def _wait_for_connection(pc: RTCPeerConnection, timeout: float = 30) -> None:
-        logger.info("SFU publisher waiting for connection (ICE=%s, peer=%s)", pc.iceConnectionState, pc.connectionState)
+    async def _monitor_connection(self, pc: RTCPeerConnection, session_id: str) -> None:
+        logger.info("SFU publisher monitoring connection (ICE=%s, peer=%s)", pc.iceConnectionState, pc.connectionState)
         if pc.connectionState == "connected":
             return
         event = asyncio.Event()
+
         @pc.on("connectionstatechange")
         async def on_connection_state_change():
             if pc.connectionState in ("connected", "failed", "closed"):
                 event.set()
+
         try:
-            await asyncio.wait_for(event.wait(), timeout)
+            await asyncio.wait_for(event.wait(), timeout=60)
         except asyncio.TimeoutError:
             logger.error("SFU publisher connection timed out (ICE=%s, peer=%s)", pc.iceConnectionState, pc.connectionState)
-            raise
-        if pc.connectionState != "connected":
-            raise RuntimeError(f"SFU publisher connection ended in state {pc.connectionState} (ICE={pc.iceConnectionState})")
+            await self._handle_connection_failure(pc, session_id)
+            return
+        if pc.connectionState == "connected":
+            logger.info("SFU publisher connected")
+        else:
+            logger.error("SFU publisher connection ended (ICE=%s, peer=%s)", pc.iceConnectionState, pc.connectionState)
+            await self._handle_connection_failure(pc, session_id)
 
+    async def _handle_connection_failure(self, pc: RTCPeerConnection, session_id: str) -> None:
+        async with self._lock:
+            if self.pc is not pc:
+                return
+            self.pc = None
+            self.session_id = None
+            self._connection_task = None
+            await pc.close()
+            if self.configured:
+                try:
+                    await self._close_session(session_id)
+                except Exception:
+                    logger.warning("Could not clean up failed SFU session %s", session_id, exc_info=True)
     @staticmethod
     async def _wait_for_ice(pc: RTCPeerConnection, timeout: float = 20) -> None:
         if pc.iceGatheringState == "complete":
@@ -174,6 +197,11 @@ class CloudflareSFUPublisher:
             pc, session_id = self.pc, self.session_id
             self.pc = None
             self.session_id = None
+            connection_task = self._connection_task
+            self._connection_task = None
+            if connection_task and connection_task is not asyncio.current_task():
+                connection_task.cancel()
+                await asyncio.gather(connection_task, return_exceptions=True)
             if pc:
                 await pc.close()
             if session_id and self.configured:
